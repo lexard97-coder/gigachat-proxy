@@ -7,7 +7,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Ваши данные авторизации
 const CLIENT_ID = "019d25fe-d451-7581-b931-748abffe3262";
 const SECRET = "MDE5ZDI1ZmUtZDQ1MS03NTgxLWI5MzEtNzQ4YWJmZmUzMjYyOmIxNDc5NDZlLTEyMWMtNDM4MC04ZDdhLTYxYTU5ZGQ2M2QyMQ==";
 const SCOPE = "GIGACHAT_API_PERS";
@@ -15,72 +14,51 @@ const SCOPE = "GIGACHAT_API_PERS";
 let accessToken = null;
 let tokenExpiry = null;
 
-// Генерация RqUID
 function generateRqUID() {
   return crypto.randomUUID();
 }
 
-// Получение токена
 async function getAccessToken() {
   if (accessToken && tokenExpiry && Date.now() < tokenExpiry - 300000) {
-    console.log('✅ Используем кэшированный токен');
     return accessToken;
   }
 
-  console.log('🔄 Запрашиваем новый токен...');
-  
   const authString = Buffer.from(`${CLIENT_ID}:${SECRET}`).toString('base64');
-  const rqUid = generateRqUID();
-  
   const response = await fetch('https://ngw.devices.sberbank.ru:9443/api/v2/oauth', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
       'Accept': 'application/json',
       'Authorization': `Basic ${authString}`,
-      'RqUID': rqUid
+      'RqUID': generateRqUID()
     },
     body: `scope=${SCOPE}`
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('❌ Ошибка получения токена:', response.status, errorText);
-    throw new Error(`Ошибка авторизации: ${response.status} - ${errorText}`);
+    throw new Error(`Ошибка получения токена: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
   accessToken = data.access_token;
   tokenExpiry = Date.now() + (data.expires_in || 1800) * 1000;
-  
-  console.log('✅ Токен получен, expires_in:', data.expires_in);
   return accessToken;
 }
 
-// GET-эндпоинт для проверки
 app.get('/api/chat', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    message: 'GigaChat Proxy работает. Используйте POST-запросы.',
-    timestamp: new Date().toISOString()
-  });
+  res.json({ status: 'ok', message: 'GigaChat Proxy работает' });
 });
 
-// POST-эндпоинт для чата
 app.post('/api/chat', async (req, res) => {
-  console.log('📩 Получен POST-запрос');
-  
   try {
     const { message } = req.body;
-    
     if (!message) {
       return res.status(400).json({ error: 'Отсутствует поле message' });
     }
-    
-    // Получаем токен
+
     const token = await getAccessToken();
     
-    // Формируем запрос к GigaChat
     const response = await fetch('https://gigachat.devices.sberbank.ru/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -91,40 +69,26 @@ app.post('/api/chat', async (req, res) => {
       body: JSON.stringify({
         model: 'GigaChat-MAX',
         messages: [
-          { 
-            role: 'system', 
-            content: 'Ты — эксперт по химии. Отвечай на русском языке, подробно, с примерами. Генерируй задания из ФИПИ, ОГЭ, ЕГЭ.' 
-          },
+          { role: 'system', content: 'Ты — эксперт по химии. Отвечай на русском языке, подробно, с примерами. Генерируй задания из ФИПИ, ОГЭ, ЕГЭ.' },
           { role: 'user', content: message }
         ],
         temperature: 0.7,
         max_tokens: 1024
       })
     });
-    
+
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ GigaChat API error:', response.status, errorText);
-      return res.status(response.status).json({ 
-        error: `GigaChat API error: ${response.status}`,
-        details: errorText
-      });
+      return res.status(response.status).json({ error: `GigaChat API error: ${response.status}` });
     }
-    
+
     const data = await response.json();
-    const reply = data.choices[0].message.content;
-    
-    console.log('✅ Ответ получен, длина:', reply.length);
-    res.json({ reply });
+    res.json({ reply: data.choices[0].message.content });
     
   } catch (error) {
-    console.error('❌ Ошибка в прокси:', error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 GigaChat Proxy запущен на порту ${PORT}`);
-  console.log(`📍 Проверка: GET https://localhost:${PORT}/api/chat`);
-});
+app.listen(PORT, () => console.log(`🚀 Proxy запущен на порту ${PORT}`));
